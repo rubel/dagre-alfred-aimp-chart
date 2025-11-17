@@ -1,0 +1,1152 @@
+import { Button, Drawer, Input, message, Select, Switch } from "antd";
+import * as d3 from "d3";
+import dagre from "dagre";
+import { graphlib } from "dagre-d3-es";
+import { useEffect, useRef, useState } from "react";
+import { chart_1212 } from "./chartData";
+import "./topology.css";
+
+const { Option } = Select;
+
+function D3TopologyDiagram({ allAssets, backButtonHandler }) {
+  const svgRef = useRef();
+  const zoomToFitRef = useRef();
+  const [nodes, setNodes] = useState([]);
+  const [links, setLinks] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [tempLink, setTempLink] = useState(null);
+  const [selectedAssetToAdd, setSelectedAssetToAdd] = useState(null);
+  const [dragSourceNodeId, setDragSourceNodeId] = useState(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState([]);
+  const [nextNodeIdToCreate, setNextNodeIdToCreate] = useState(0);
+
+  const [groupName, setGroupName] = useState("");
+  const [relationType, setRelationType] = useState("parent_child");
+
+  const isDraggingRef = useRef(false);
+  const nodePositionsRef = useRef(new Map());
+  const initialLayoutDoneRef = useRef(false);
+  const currentZoomRef = useRef(d3.zoomIdentity);
+
+  const colors = {
+    nodeBgNormal: "#e7ecef",
+    nodeBgSelected: "#edf2fb",
+    nodeBorderNormal: "#03045e",
+    nodeBorderSelected: "none",
+    nodeTextColor: "#1e293b",
+    nodeTextColorSelected: "#001d3d",
+    groupChildBg: "#edf2fb",
+    groupChildBorder: "#003566",
+    groupChildContainerBg: "#caf0f8",
+    groupChildContainerBorder: "#0077b6",
+    groupChildText: "#000000",
+    connectionPointBorderNormal: "#acadbc",
+    connectionPointBgNormal: "#9b9ece",
+    connectionPointBorderHover: "#fdc921",
+    connectionPointBgHover: "#fdd85d",
+    linkGreen: "#10b981",
+    linkRed: "#ef4444",
+    tempLink: "#94a3b8",
+    arrowColor: "#000000",
+  };
+
+  // === Your exact function (used for button and auto-fit) ===
+  const handleZoomToFit = () => {
+    const { positionedNodes } = computeLayout(nodes, links);
+    setNodes((prev) =>
+      prev.map((node) => {
+        const pos = positionedNodes.find((p) => p.id === node.id);
+        return pos ? { ...node, x: pos.x, y: pos.y } : node;
+      })
+    );
+    nodePositionsRef.current = new Map(
+      positionedNodes.map((n) => [n.id.toString(), { x: n.x, y: n.y }])
+    );
+    initialLayoutDoneRef.current = true;
+  };
+
+  const addNode = () => {
+    if (!selectedAssetToAdd) {
+      message.error("Select a node first");
+      return;
+    }
+
+    const centerX = nodes.length
+      ? nodes.reduce((sum, n) => sum + (n.x || 0), 0) / nodes.length
+      : 500;
+    const centerY = nodes.length
+      ? nodes.reduce((sum, n) => sum + (n.y || 0), 0) / nodes.length
+      : 300;
+
+    const radius = 100 + Math.random() * 100;
+    const angle = Math.random() * 2 * Math.PI;
+    const x = centerX + radius * Math.cos(angle);
+    const y = centerY + radius * Math.sin(angle);
+
+    const newNode = {
+      id: nextNodeIdToCreate,
+      x,
+      y,
+      name: selectedAssetToAdd,
+      type: "node",
+    };
+
+    setNodes((prev) => [...prev, newNode]);
+    setNextNodeIdToCreate(nextNodeIdToCreate + 1);
+    setIsModalOpen(false);
+
+    setTimeout(handleZoomToFit, 0);
+  };
+
+  const getNodeWidth = (node) => {
+    if (!node.children || node.children.length === 0) {
+      return node.name.length * 8 + 20;
+    }
+
+    const maxChildWidth = Math.max(
+      ...node.children.map((c) => {
+        const childName = typeof c === "object" ? c.name : String(c);
+        return childName.length * 5;
+      })
+    );
+
+    return Math.max(maxChildWidth + 50, node.name.length * 8 + 20);
+  };
+
+  const getNodeHeight = (node) => {
+    if (node.type === "node") {
+      return 30;
+    } else {
+      return (node.children?.length || 0) * 30 + 45;
+    }
+  };
+
+  const addGroupHandler = () => {
+    if (groupName.length > 0) {
+      const newGroup = {
+        id: nextNodeIdToCreate,
+        x: 400,
+        y: 100,
+        name: groupName,
+        type: "group",
+        children: nodes.filter((n) => selectedNodeIds.includes(n.id)),
+      };
+      setNextNodeIdToCreate(nextNodeIdToCreate + 1);
+      setGroupName("");
+      setNodes((prev) => [
+        ...prev.filter((n) => !selectedNodeIds.includes(n.id)),
+        newGroup,
+      ]);
+      setLinks((prev) =>
+        prev.filter(
+          (link) =>
+            !selectedNodeIds.includes(link.source.id) &&
+            !selectedNodeIds.includes(link.target.id)
+        )
+      );
+      setSelectedNodeIds([]);
+
+      setTimeout(handleZoomToFit, 0);
+    } else {
+      message.info("Give the group a name");
+    }
+  };
+
+  const renameGroupHandler = () => {};
+  const removeGroupHandler = () => {};
+
+  const nodeDetailsHandler = () => {
+    console.log(nodes);
+  };
+
+  const getRandomName = () => {
+    const randomItem = allAssets[Math.floor(Math.random() * allAssets.length)];
+    const name = randomItem.name || randomItem.value;
+    return name;
+  };
+
+  const switchLinkHandler = () => {};
+
+  const getBulkRandomNodes = (count) => {
+    const nodes = [];
+    let tempNextNodeId = nextNodeIdToCreate;
+
+    for (let i = 0; i < count; i++) {
+      const id = `node-${tempNextNodeId}`;
+      tempNextNodeId++;
+
+      const name = getRandomName();
+      const svgWidth =
+        svgRef.current?.getBoundingClientRect().width -
+          (name.length * 8 + 20) || 1000;
+      const x = Math.floor(Math.random() * svgWidth);
+      const y = Math.floor(Math.random() * 600);
+
+      nodes.push({ id, x, y, name, type: "node" });
+    }
+    setNextNodeIdToCreate(tempNextNodeId);
+    return nodes;
+  };
+
+  const getNewLinks = (childNodes, parentNode) => {
+    const tempLinks = [];
+    for (let i = 0; i < childNodes.length; i++) {
+      tempLinks.push({
+        source: childNodes[i],
+        target: parentNode,
+        relationType: relationType,
+        id: `${childNodes[i].id}-${parentNode.id}-${Date.now()}`,
+      });
+    }
+    return tempLinks;
+  };
+
+  const addBulkNodesHandler = (count) => {
+    const parentNode = nodes.find((n) => n.id === selectedNodeIds[0]);
+    if (!parentNode) return;
+
+    const newNodes = getBulkRandomNodes(count);
+    const newLinks = getNewLinks(newNodes, parentNode);
+
+    setNodes((prev) => [...prev, ...newNodes]);
+    setLinks((prev) => [...prev, ...newLinks]);
+
+    setTimeout(handleZoomToFit, 0);
+  };
+
+  const closeDrawer = () => {
+    setIsModalOpen(false);
+  };
+
+  const changeSelectedAssetToAdd = (asset) => {
+    setSelectedAssetToAdd(asset);
+  };
+
+  const handleToggle = (checked) => {
+    setRelationType(checked ? "parent_child" : "interface");
+  };
+
+  const handleDeleteNode = () => {
+    if (selectedNodeIds.length > 0) {
+      setNodes((prev) =>
+        prev.filter((node) => !selectedNodeIds.includes(node.id))
+      );
+      setLinks((prev) =>
+        prev.filter(
+          (link) =>
+            !selectedNodeIds.includes(link.source.id) &&
+            !selectedNodeIds.includes(link.target.id)
+        )
+      );
+      setSelectedNodeIds([]);
+
+      setTimeout(handleZoomToFit, 0);
+    }
+  };
+
+  const computeLayout = (nodes, links) => {
+    const g = new graphlib.Graph({ directed: true });
+
+    g.setGraph({
+      rankdir: "LR",
+      align: "UL",
+      ranksep: 100,
+      nodesep: 40,
+      marginx: 50,
+      marginy: 50,
+    });
+
+    g.setDefaultEdgeLabel(() => ({}));
+
+    nodes.forEach((node) => {
+      const width = getNodeWidth(node);
+      const height = getNodeHeight(node);
+      g.setNode(node.id.toString(), { width, height });
+    });
+
+    links.forEach((link) => {
+      g.setEdge(link.target.id.toString(), link.source.id.toString());
+    });
+
+    dagre.layout(g);
+
+    const positionedNodes = nodes.map((node) => {
+      const n = g.node(node.id.toString());
+      return {
+        ...node,
+        x: n.x,
+        y: n.y,
+        width: n.width,
+        height: n.height,
+      };
+    });
+
+    const positionedLinks = links.map((link) => {
+      const edge = g.edge(link.target.id.toString(), link.source.id.toString());
+      return {
+        ...link,
+        points: edge.points,
+      };
+    });
+
+    return { positionedNodes, positionedLinks };
+  };
+
+  const getNodePositionFromDOM = (nodeId, inner) => {
+    const nodeElement = inner.select(`g.node[id="${nodeId}"]`);
+    if (nodeElement.empty()) return null;
+    const transform = nodeElement.attr("transform");
+    if (transform) {
+      const match = transform.match(/translate\(([^,]+),([^)]+)\)/);
+      if (match) {
+        return {
+          x: parseFloat(match[1]),
+          y: parseFloat(match[2]),
+        };
+      }
+    }
+    return null;
+  };
+
+  const updateEdgeDuringDrag = (
+    sourceId,
+    targetId,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    inner
+  ) => {
+    const edgeElement = inner.select(
+      `g.edgePath[data-source="${sourceId}"][data-target="${targetId}"]`
+    );
+    if (!edgeElement.empty()) {
+      const midX = (sourceX + targetX) / 2;
+      const path = `M${sourceX},${sourceY} H${midX} V${targetY} H${targetX}`;
+      edgeElement.select("path").attr("d", path);
+
+      const pathNode = edgeElement.select("path").node();
+      if (pathNode) {
+        const totalLength = pathNode.getTotalLength();
+        if (totalLength > 20) {
+          const startPoint = pathNode.getPointAtLength(5);
+          const anglePoint = pathNode.getPointAtLength(15);
+          const angle =
+            Math.atan2(
+              anglePoint.y - startPoint.y,
+              anglePoint.x - startPoint.x
+            ) *
+            (180 / Math.PI);
+          const flippedAngle = angle + 180;
+          const playButton = edgeElement.select(".play-button-marker");
+          playButton.attr(
+            "transform",
+            `translate(${startPoint.x}, ${startPoint.y}) rotate(${flippedAngle})`
+          );
+        }
+      }
+    }
+  };
+
+  const setupDrag = (inner, nodeLevels, rootNodes) => {
+    const drag = d3
+      .drag()
+      .on("start", function (event, d) {
+        isDraggingRef.current = true;
+        const nodeGroup = d3.select(this);
+        nodeGroup.raise();
+        const transform = nodeGroup.attr("transform");
+        if (transform) {
+          const match = transform.match(/translate\(([^,]+),([^)]+)\)/);
+          if (match) {
+            nodePositionsRef.current.set(d.id.toString(), {
+              x: parseFloat(match[1]),
+              y: parseFloat(match[2]),
+            });
+          }
+        }
+      })
+      .on("drag", function (event, d) {
+        if (!isDraggingRef.current) return;
+        const currentPos = nodePositionsRef.current.get(d.id.toString()) || {
+          x: 0,
+          y: 0,
+        };
+        const newX = currentPos.x + event.dx;
+        const newY = currentPos.y + event.dy;
+        nodePositionsRef.current.set(d.id.toString(), { x: newX, y: newY });
+        d3.select(this).attr("transform", `translate(${newX}, ${newY})`);
+
+        const connectedLinks = links.filter(
+          (link) => link.source.id === d.id || link.target.id === d.id
+        );
+        connectedLinks.forEach((link) => {
+          const sourceId = link.source.id.toString();
+          const targetId = link.target.id.toString();
+          let sourcePos, targetPos;
+          if (sourceId === d.id.toString()) {
+            sourcePos = { x: newX, y: newY };
+            targetPos =
+              nodePositionsRef.current.get(targetId) ||
+              getNodePositionFromDOM(targetId, inner);
+          } else {
+            sourcePos =
+              nodePositionsRef.current.get(sourceId) ||
+              getNodePositionFromDOM(sourceId, inner);
+            targetPos = { x: newX, y: newY };
+          }
+          if (sourcePos && targetPos) {
+            updateEdgeDuringDrag(
+              sourceId,
+              targetId,
+              sourcePos.x,
+              sourcePos.y,
+              targetPos.x,
+              targetPos.y,
+              inner
+            );
+          }
+        });
+      })
+      .on("end", function (event, d) {
+        isDraggingRef.current = false;
+        const finalPos = nodePositionsRef.current.get(d.id.toString());
+        if (finalPos) {
+          setNodes((prev) =>
+            prev.map((node) =>
+              node.id === d.id
+                ? { ...node, x: finalPos.x, y: finalPos.y }
+                : node
+            )
+          );
+        }
+        if (
+          Math.abs(event.sourceEvent.movementX) < 2 &&
+          Math.abs(event.sourceEvent.movementY) < 2
+        ) {
+          setSelectedNodeIds([d.id]);
+        }
+      });
+
+    inner.selectAll("g.node").call(drag);
+  };
+
+  const draw = () => {
+    const childrenMap = {};
+    const parentMap = {};
+
+    links.forEach((link) => {
+      const parentId = link.target.id;
+      const childId = link.source.id;
+
+      if (!childrenMap[parentId]) childrenMap[parentId] = [];
+      if (!parentMap[childId]) parentMap[childId] = [];
+
+      childrenMap[parentId].push(childId);
+      parentMap[childId].push(parentId);
+    });
+
+    const rootNodes = nodes.filter((node) => !parentMap[node.id]);
+
+    const nodeLevels = {};
+    const processedNodes = new Set();
+
+    const assignLevels = (nodeId, level) => {
+      if (nodeLevels[nodeId] !== undefined && nodeLevels[nodeId] >= level)
+        return;
+
+      nodeLevels[nodeId] = level;
+      processedNodes.add(nodeId);
+
+      const children = childrenMap[nodeId] || [];
+      children.forEach((childId) => {
+        assignLevels(childId, level + 1);
+      });
+    };
+
+    rootNodes.forEach((root) => {
+      assignLevels(root.id, 0);
+    });
+
+    nodes.forEach((node) => {
+      if (!processedNodes.has(node.id)) {
+        nodeLevels[node.id] = nodes.length;
+      }
+    });
+
+    const svg = d3.select(svgRef.current);
+    const inner = svg.select("g");
+
+    inner.selectAll("*").remove();
+
+    const hasManualPositions = nodes.every(
+      (n) => n.x !== undefined && n.y !== undefined
+    );
+
+    let positionedNodes, positionedLinks;
+
+    if (!initialLayoutDoneRef.current || !hasManualPositions) {
+      ({ positionedNodes, positionedLinks } = computeLayout(nodes, links));
+      positionedNodes.forEach((n) =>
+        nodePositionsRef.current.set(n.id.toString(), { x: n.x, y: n.y })
+      );
+      initialLayoutDoneRef.current = true;
+      setNodes((prev) =>
+        prev.map((node, i) => ({
+          ...node,
+          x: positionedNodes[i]?.x || 0,
+          y: positionedNodes[i]?.y || 0,
+        }))
+      );
+      return;
+    } else {
+      positionedNodes = nodes.map((n) => ({
+        ...n,
+        width: getNodeWidth(n),
+        height: getNodeHeight(n),
+      }));
+      positionedLinks = links.map((l) => {
+        const sourcePos = nodePositionsRef.current.get(
+          l.source.id.toString()
+        ) || { x: l.source.x || 0, y: l.source.y || 0 };
+        const targetPos = nodePositionsRef.current.get(
+          l.target.id.toString()
+        ) || { x: l.target.x || 0, y: l.target.y || 0 };
+        const midX = (sourcePos.x + targetPos.x) / 2;
+        const points = [
+          { x: sourcePos.x, y: sourcePos.y },
+          { x: midX, y: sourcePos.y },
+          { x: midX, y: targetPos.y },
+          { x: targetPos.x, y: targetPos.y },
+        ];
+        return { ...l, points };
+      });
+    }
+
+    const edgeGroups = inner
+      .selectAll("g.edgePath")
+      .data(positionedLinks)
+      .enter()
+      .append("g")
+      .attr("class", "edgePath")
+      .attr("data-source", (d) => d.source.id.toString())
+      .attr("data-target", (d) => d.target.id.toString());
+
+    edgeGroups
+      .append("path")
+      .attr("d", (d) => {
+        const lineGenerator = d3
+          .line()
+          .x((p) => p.x)
+          .y((p) => p.y)
+          .curve(d3.curveLinear);
+        return lineGenerator(d.points);
+      })
+      .style("stroke", "#666")
+      .style("fill", "none")
+      .style("stroke-width", "2px")
+      .style("stroke-linecap", "round")
+      .style("stroke-linejoin", "round");
+
+    edgeGroups.each(function (d) {
+      const edge = d3.select(this);
+      const pathNode = edge.select("path").node();
+      if (pathNode) {
+        const totalLength = pathNode.getTotalLength();
+        if (totalLength > 20) {
+          const startPoint = pathNode.getPointAtLength(5);
+          const anglePoint = pathNode.getPointAtLength(15);
+          const angle =
+            Math.atan2(
+              anglePoint.y - startPoint.y,
+              anglePoint.x - startPoint.x
+            ) *
+            (180 / Math.PI);
+          const flippedAngle = angle + 180;
+          const playButtonGroup = edge
+            .append("g")
+            .attr("class", "play-button-marker")
+            .attr(
+              "transform",
+              `translate(${startPoint.x}, ${startPoint.y}) rotate(${flippedAngle})`
+            );
+          playButtonGroup
+            .append("path")
+            .attr("d", "M0,-8 L12,0 L0,8 Z")
+            .style("fill", "#000000")
+            .style("stroke", "#000000")
+            .style("stroke-width", "1px");
+        }
+      }
+    });
+
+    const nodeGroups = inner
+      .selectAll("g.node")
+      .data(positionedNodes)
+      .enter()
+      .append("g")
+      .attr("class", "node")
+      .attr("id", (d) => d.id.toString())
+      .attr("transform", (d) => `translate(${d.x}, ${d.y})`);
+
+    nodeGroups.each(function (d) {
+      const nodeGroup = d3.select(this);
+      const level = nodeLevels[d.id] || 0;
+      const isRoot = rootNodes.some((root) => root.id === d.id);
+
+      let nodeStyle, labelColor;
+
+      if (selectedNodeIds.includes(d.id)) {
+        nodeStyle = {
+          fill: colors.nodeBgSelected,
+          stroke: colors.nodeBorderSelected,
+          strokeWidth: "0px",
+        };
+        labelColor = colors.nodeTextColorSelected;
+      } else if (isRoot) {
+        nodeStyle = {
+          fill: "#4CAF50",
+          stroke: "#2E7D32",
+          strokeWidth: "3px",
+        };
+        labelColor = "#fff";
+      } else if (level === 1) {
+        nodeStyle = {
+          fill: "#2196F3",
+          stroke: "#0D47A1",
+          strokeWidth: "2px",
+        };
+        labelColor = "#fff";
+      } else {
+        nodeStyle = {
+          fill: "#e3f2fd",
+          stroke: "#1565C0",
+          strokeWidth: "2px",
+        };
+        labelColor = "#333";
+      }
+
+      nodeGroup
+        .append("rect")
+        .attr("width", d.width)
+        .attr("height", d.height)
+        .attr("x", -d.width / 2)
+        .attr("y", -d.height / 2)
+        .attr("rx", 5)
+        .attr("ry", 5)
+        .style("fill", nodeStyle.fill)
+        .style("stroke", nodeStyle.stroke)
+        .style("stroke-width", nodeStyle.strokeWidth);
+
+      // Only show name
+      nodeGroup
+        .append("text")
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "middle")
+        .style("font-size", "14px")
+        .style("font-weight", "bold")
+        .style("font-family", "sans-serif")
+        .style("fill", labelColor)
+        .text(d.name);
+    });
+
+    nodeGroups.append("title").text((d) => {
+      const level = nodeLevels[d.id] || 0;
+      const isRoot = rootNodes.some((root) => root.id === d.id);
+      const nodeType = isRoot ? "Root/Parent" : `Child (Level ${level})`;
+      return `${d?.asset_equipdesc || d.id}\nID: ${d.id}\nType: ${nodeType}`;
+    });
+
+    nodeGroups
+      .on("mouseover", function (event, d) {
+        d3.select(this)
+          .select("rect")
+          .style("stroke", "#ff6f00")
+          .style("stroke-width", "4px");
+      })
+      .on("mouseout", function (event, d) {
+        const level = nodeLevels[d.id] || 0;
+        const isRoot = rootNodes.some((root) => root.id === d.id);
+
+        let strokeColor, strokeWidth;
+        if (selectedNodeIds.includes(d.id)) {
+          strokeColor = colors.nodeBorderSelected;
+          strokeWidth = "0px";
+        } else if (isRoot) {
+          strokeColor = "#2E7D32";
+          strokeWidth = "3px";
+        } else if (level === 1) {
+          strokeColor = "#0D47A1";
+          strokeWidth = "2px";
+        } else {
+          strokeColor = "#1565C0";
+          strokeWidth = "2px";
+        }
+
+        d3.select(this)
+          .select("rect")
+          .style("stroke", strokeColor)
+          .style("stroke-width", strokeWidth);
+      });
+
+    edgeGroups
+      .on("mouseover", function (event, d) {
+        d3.select(this)
+          .select("path")
+          .style("stroke", "#ff6f00")
+          .style("stroke-width", "3px");
+
+        d3.select(this)
+          .select(".play-button-marker path")
+          .style("fill", "#333")
+          .style("stroke", "#333");
+      })
+      .on("mouseout", function (event, d) {
+        d3.select(this)
+          .select("path")
+          .style("stroke", "#666")
+          .style("stroke-width", "2px");
+
+        d3.select(this)
+          .select(".play-button-marker path")
+          .style("fill", "#000000")
+          .style("stroke", "#000000");
+      });
+
+    setupDrag(inner, nodeLevels, rootNodes);
+
+    const zoom = d3
+      .zoom()
+      .scaleExtent([0.1, 2])
+      .on("zoom", (event) => {
+        inner.attr("transform", event.transform);
+        currentZoomRef.current = event.transform;
+      });
+
+    svg.call(zoom);
+
+    const zoomToFit = () => {
+      const bounds = inner.node().getBBox();
+      const parent = svg.node().parentElement;
+      const fullWidth = parent.clientWidth;
+      const fullHeight = parent.clientHeight;
+
+      if (bounds.width > 0 && bounds.height > 0) {
+        const scale = Math.min(
+          0.85,
+          0.85 / Math.max(bounds.width / fullWidth, bounds.height / fullHeight)
+        );
+        const translate = [
+          (fullWidth - bounds.width * scale) / 2 - bounds.x * scale,
+          (fullHeight - bounds.height * scale) / 2 - bounds.y * scale,
+        ];
+
+        const newTransform = d3.zoomIdentity
+          .translate(translate[0], translate[1])
+          .scale(scale);
+        svg.call(zoom.transform, newTransform);
+        currentZoomRef.current = newTransform;
+      }
+    };
+    zoomToFitRef.current = zoomToFit;
+
+    if (initialLayoutDoneRef.current) {
+      setTimeout(() => {
+        svg.call(zoom.transform, currentZoomRef.current);
+      }, 0);
+    }
+  };
+
+  const handleZoomToFitClick = () => {
+    handleZoomToFit();
+    setTimeout(() => {
+      if (zoomToFitRef.current) zoomToFitRef.current();
+    }, 100);
+  };
+
+  const parseNetworkChartData = (chartData) => {
+    const allNodes = Array.from(
+      new Map(
+        chartData.relationships
+          .filter((n) => n.relationship_type === 0)
+          .map((item) => [
+            item.this_asset_id,
+            {
+              id: item.this_asset_id,
+              type: "node",
+              x: parseFloat(item?.x || "0") || 0,
+              y: parseFloat(item?.y || "0") || 0,
+              name: " " + item.this_asset_id + " ",
+              asset_equipdesc: item.this.asset_equipdesc,
+              criticality: item.criticality,
+            },
+          ])
+      ).values()
+    );
+
+    const allParentChildRelations = chartData.relationships
+      .filter((n) => n.relationship_type === 1)
+      .map((item) => ({
+        source: allNodes.find((n) => n.id === item.this_asset_id),
+        target: allNodes.find((n) => n.id === item.other_asset_id),
+        relationType: "parent_child",
+      }))
+      .filter((r) => r.source && r.target);
+
+    const allInterfaceRelations = chartData.relationships
+      .filter((n) => n.relationship_type === 2)
+      .map((item) => ({
+        source: allNodes.find((n) => n.id === item.this_asset_id),
+        target: allNodes.find((n) => n.id === item.other_asset_id),
+        relationType: "interface",
+      }))
+      .filter((r) => r.source && r.target);
+
+    return {
+      allNodes: allNodes,
+      allLinks: [...allParentChildRelations, ...allInterfaceRelations],
+    };
+  };
+
+  const loadChartData = async () => {
+    try {
+      const response = chart_1212;
+      const chartData = parseNetworkChartData(response);
+
+      setNodes(chartData.allNodes);
+      setLinks(chartData.allLinks);
+      setNextNodeIdToCreate(nextNodeIdToCreate + 1);
+
+      initialLayoutDoneRef.current = false;
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  useEffect(() => {
+    if (!svgRef.current || isDraggingRef.current) return;
+
+    draw();
+
+    // Auto zoom-to-fit on first load only
+    if (nodes.length > 0 && !initialLayoutDoneRef.current) {
+      setTimeout(() => {
+        handleZoomToFit(); // Ensures proper Dagre layout with correct node sizes
+
+        setTimeout(() => {
+          if (zoomToFitRef.current) {
+            zoomToFitRef.current(); // Visually fit the graph in viewport
+          }
+        }, 150);
+      }, 50);
+    }
+  }, [nodes, links]);
+
+  useEffect(() => {
+    if (
+      svgRef.current &&
+      selectedNodeIds.length === 1 &&
+      initialLayoutDoneRef.current
+    ) {
+      const svg = d3.select(svgRef.current);
+      const inner = svg.select("g");
+
+      const parentMap = {};
+      links.forEach((link) => {
+        if (!parentMap[link.source.id]) parentMap[link.source.id] = [];
+        parentMap[link.source.id].push(link.target.id);
+      });
+      const rootNodes = nodes.filter((node) => !parentMap[node.id]);
+
+      const nodeLevels = {};
+      const assignLevels = (nodeId, level) => {
+        if (nodeLevels[nodeId] !== undefined && nodeLevels[nodeId] >= level)
+          return;
+        nodeLevels[nodeId] = level;
+        const children = links
+          .filter((l) => l.target.id === nodeId)
+          .map((l) => l.source.id);
+        children.forEach((childId) => assignLevels(childId, level + 1));
+      };
+      rootNodes.forEach((root) => assignLevels(root.id, 0));
+      nodes.forEach((node) => {
+        if (nodeLevels[node.id] === undefined)
+          nodeLevels[node.id] = nodes.length;
+      });
+
+      inner.selectAll("g.node").each(function (d) {
+        const nodeGroup = d3.select(this);
+        const level = nodeLevels[d.id] || 0;
+        const isRoot = rootNodes.some((root) => root.id === d.id);
+
+        if (d.id === selectedNodeIds[0]) {
+          nodeGroup
+            .select("rect")
+            .style("fill", colors.nodeBgSelected)
+            .style("stroke", colors.nodeBorderSelected)
+            .style("stroke-width", "0px");
+          nodeGroup.select("text").style("fill", colors.nodeTextColorSelected);
+        } else {
+          let nodeStyle, labelColor;
+          if (isRoot) {
+            nodeStyle = {
+              fill: "#4CAF50",
+              stroke: "#2E7D32",
+              strokeWidth: "3px",
+            };
+            labelColor = "#fff";
+          } else if (level === 1) {
+            nodeStyle = {
+              fill: "#2196F3",
+              stroke: "#0D47A1",
+              strokeWidth: "2px",
+            };
+            labelColor = "#fff";
+          } else {
+            nodeStyle = {
+              fill: "#e3f2fd",
+              stroke: "#1565C0",
+              strokeWidth: "2px",
+            };
+            labelColor = "#333";
+          }
+          nodeGroup
+            .select("rect")
+            .style("fill", nodeStyle.fill)
+            .style("stroke", nodeStyle.stroke)
+            .style("stroke-width", nodeStyle.strokeWidth);
+          nodeGroup.select("text").style("fill", labelColor);
+        }
+      });
+    }
+  }, [selectedNodeIds]);
+
+  useEffect(() => {
+    if (nodes.length === 0) {
+      loadChartData();
+    }
+  }, []);
+
+  return (
+    <div className="topology-container" style={{ padding: "10px" }}>
+      <div className="topology-top-nav">
+        <Input
+          className="btn"
+          value={groupName}
+          placeholder="Please input Group name"
+          onChange={(e) => setGroupName(e.target.value)}
+          style={{ minWidth: "120px", maxWidth: "160px" }}
+        />
+        <Button
+          className="btn"
+          type="primary"
+          onClick={addGroupHandler}
+          disabled={selectedNodeIds.length < 2}
+        >
+          Add Group
+        </Button>
+        <Button
+          className="btn"
+          type="primary"
+          onClick={renameGroupHandler}
+          disabled={
+            groupName.length < 3 ||
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "group"
+          }
+        >
+          Rename Group
+        </Button>
+        <Button
+          className="btn"
+          type="primary"
+          onClick={removeGroupHandler}
+          disabled={
+            groupName.length < 3 ||
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "group"
+          }
+        >
+          Remove Group
+        </Button>
+        <Button
+          className="btn"
+          type="primary"
+          onClick={() => setIsModalOpen(true)}
+        >
+          Add Node
+        </Button>
+
+        <Button
+          className="btn"
+          type="primary"
+          onClick={nodeDetailsHandler}
+          disabled={
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "node"
+          }
+        >
+          Node Details
+        </Button>
+        <Button className="btn" type="primary" onClick={switchLinkHandler}>
+          Switch Link
+        </Button>
+
+        <Button className="btn" type="primary" onClick={handleZoomToFitClick}>
+          Zoom to Fit
+        </Button>
+        <Button
+          className="btn"
+          type="primary"
+          onClick={() => handleZoomToFitClick(2)}
+        >
+          Center The Chart
+        </Button>
+
+        <Button
+          onClick={handleDeleteNode}
+          className={"btn"}
+          disabled={!selectedNodeIds.length > 0}
+          style={{
+            backgroundColor: selectedNodeIds.length > 0 ? "#ef4444" : "#9ca3af",
+            borderRadius: "0px",
+            color: "white",
+          }}
+        >
+          Delete Node
+        </Button>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            background: "#dfdfdf",
+            padding: "0px 10px",
+          }}
+        >
+          <Switch
+            checkedChildren="Parent/Child"
+            unCheckedChildren="Interface"
+            checked={relationType === "parent_child"}
+            onChange={handleToggle}
+            style={{
+              backgroundColor:
+                relationType === "parent_child" ? "green" : "red",
+              borderColor: relationType === "parent_child" ? "green" : "red",
+            }}
+          />
+        </div>
+
+        <Button
+          className="btn"
+          onClick={() => addBulkNodesHandler(2)}
+          disabled={
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "node"
+          }
+        >
+          Add 2 Nodes
+        </Button>
+        <Button
+          className="btn"
+          onClick={() => addBulkNodesHandler(5)}
+          disabled={
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "node"
+          }
+        >
+          Add 5 Nodes
+        </Button>
+        <Button
+          className="btn"
+          onClick={() => addBulkNodesHandler(10)}
+          disabled={
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "node"
+          }
+        >
+          Add 10 Nodes
+        </Button>
+        <Button
+          className="btn"
+          onClick={() => addBulkNodesHandler(20)}
+          disabled={
+            selectedNodeIds.length !== 1 ||
+            nodes.find((n) => n.id === selectedNodeIds[0])?.type !== "node"
+          }
+        >
+          Add 20 Nodes
+        </Button>
+        <Button className="btn" onClick={backButtonHandler}>
+          Back
+        </Button>
+
+        <div
+          style={{
+            fontWeight: "bold",
+            fontSize: "20px",
+            padding: "0px 20px",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          Total Nodes: {nodes.length}
+        </div>
+      </div>
+
+      <svg
+        ref={svgRef}
+        width="100%"
+        height="calc(100vh - 285px)"
+        style={{
+          border: "1px solid #ccc",
+          marginTop: 10,
+          background: "#fafafa",
+        }}
+      >
+        <g />
+      </svg>
+
+      <Drawer
+        title="Settings"
+        placement="left"
+        onClose={closeDrawer}
+        open={isModalOpen}
+        width={300}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <h3>Add Node</h3>
+          <p>Select an asset:</p>
+          <Select
+            placeholder="Choose one"
+            style={{ width: "100%" }}
+            value={selectedAssetToAdd}
+            onChange={changeSelectedAssetToAdd}
+          >
+            {allAssets.map((a, i) => (
+              <Option key={i} value={a.name}>
+                {a.name}
+              </Option>
+            ))}
+          </Select>
+
+          <div style={{ textAlign: "right", marginTop: "20px" }}>
+            <Button type="text" onClick={() => setIsModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="primary"
+              disabled={!selectedAssetToAdd}
+              onClick={addNode}
+              style={{ marginLeft: 8 }}
+            >
+              OK
+            </Button>
+          </div>
+        </div>
+      </Drawer>
+    </div>
+  );
+}
+
+export default D3TopologyDiagram;
