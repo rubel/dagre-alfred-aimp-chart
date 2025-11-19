@@ -1,4 +1,12 @@
-import { Button, Drawer, Input, message, Select, Switch } from "antd";
+import {
+  Button,
+  ColorPicker,
+  Drawer,
+  Input,
+  message,
+  Select,
+  Switch,
+} from "antd";
 import * as d3 from "d3";
 import dagre from "dagre";
 import { graphlib } from "dagre-d3-es";
@@ -14,15 +22,14 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
   const [nodes, setNodes] = useState([]);
   const [links, setLinks] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [tempLink, setTempLink] = useState(null);
   const [selectedAssetToAdd, setSelectedAssetToAdd] = useState(null);
-  const [dragSourceNodeId, setDragSourceNodeId] = useState(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState([]);
   const [nextNodeIdToCreate, setNextNodeIdToCreate] = useState(0);
   const [isLayouting, setIsLayouting] = useState(false);
 
   const [groupName, setGroupName] = useState("");
   const [relationType, setRelationType] = useState("parent_child");
+  const [groupColor, setGroupColor] = useState("#1677ff");
 
   const isDraggingRef = useRef(false);
   const nodePositionsRef = useRef(new Map());
@@ -30,9 +37,9 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
   const currentZoomRef = useRef(d3.zoomIdentity);
 
   const colors = {
-    nodeBgNormal: "#e7ecef",
+    nodeBgNormal: "#e3f2fd",
     nodeBgSelected: "#edf2fb",
-    nodeBorderNormal: "#03045e",
+    nodeBorderNormal: "#1565C0",
     nodeBorderSelected: "#f00000",
     nodeTextColor: "#1e293b",
     nodeTextColorSelected: "#001d3d",
@@ -107,81 +114,74 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
       return;
     }
 
-    const centerX = nodes.length
-      ? nodes.reduce((sum, n) => sum + (n.x || 0), 0) / nodes.length
-      : 500;
-    const centerY = nodes.length
-      ? nodes.reduce((sum, n) => sum + (n.y || 0), 0) / nodes.length
-      : 300;
+    if (selectedNodeIds.length !== 1) return;
 
-    const radius = 100 + Math.random() * 100;
-    const angle = Math.random() * 2 * Math.PI;
-    const x = centerX + radius * Math.cos(angle);
-    const y = centerY + radius * Math.sin(angle);
+    const parentNode = nodes.find((n) => n.id === selectedNodeIds[0]);
+    if (!parentNode || parentNode.type !== "node") return;
 
     const newNode = {
       id: nextNodeIdToCreate,
-      x,
-      y,
       name: selectedAssetToAdd,
       type: "node",
     };
 
+    const newLink = {
+      source: newNode,
+      target: parentNode,
+      relationType,
+      id: `${newNode.id}-${parentNode.id}-${Date.now()}-${Math.random()}`,
+    };
+
+    setIsLayouting(true);
+
     setNodes((prev) => [...prev, newNode]);
+    setLinks((prev) => [...prev, newLink]);
+
     setNextNodeIdToCreate(nextNodeIdToCreate + 1);
     setIsModalOpen(false);
 
-    setTimeout(handleZoomToFit, 0);
+    setTimeout(() => {
+      handleZoomToFit();
+
+      setTimeout(() => {
+        setIsLayouting(false);
+      }, 100);
+    }, 50);
   };
 
   const getNodeWidth = (node) => {
-    if (!node.children || node.children.length === 0) {
-      return node.name.length * 8 + 20;
-    }
+    const len =
+      node?.type === "group"
+        ? node?.name?.length + node?.groupName?.length + 3
+        : node?.name?.length;
 
-    const maxChildWidth = Math.max(
-      ...node.children.map((c) => {
-        const childName = typeof c === "object" ? c.name : String(c);
-        return childName.length * 5;
-      })
-    );
-
-    return Math.max(maxChildWidth + 50, node.name.length * 8 + 20);
+    return len * 8 + 20;
   };
 
   const getNodeHeight = (node) => {
-    if (node.type === "node") {
-      return 30;
-    } else {
-      return (node.children?.length || 0) * 30 + 45;
-    }
+    return 30;
   };
 
   const addGroupHandler = () => {
     if (groupName.length > 0) {
-      const newGroup = {
-        id: nextNodeIdToCreate,
-        x: 400,
-        y: 100,
-        name: groupName,
-        type: "group",
-        children: nodes.filter((n) => selectedNodeIds.includes(n.id)),
-      };
       setNextNodeIdToCreate(nextNodeIdToCreate + 1);
-      setGroupName("");
-      setNodes((prev) => [
-        ...prev.filter((n) => !selectedNodeIds.includes(n.id)),
-        newGroup,
-      ]);
-      setLinks((prev) =>
-        prev.filter(
-          (link) =>
-            !selectedNodeIds.includes(link.source.id) &&
-            !selectedNodeIds.includes(link.target.id)
-        )
-      );
-      setSelectedNodeIds([]);
 
+      setNodes((prevNodes) =>
+        prevNodes.map((node) => {
+          if (selectedNodeIds.includes(node.id)) {
+            return {
+              ...node,
+              type: "group",
+              groupName,
+              groupColor,
+            };
+          }
+          return node;
+        })
+      );
+
+      setGroupName("");
+      setSelectedNodeIds([]);
       setTimeout(handleZoomToFit, 0);
     } else {
       message.info("Give the group a name");
@@ -747,8 +747,8 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
         labelColor = "#fff";
       } else {
         nodeStyle = {
-          fill: "#e3f2fd",
-          stroke: "#1565C0",
+          fill: colors.nodeBgNormal,
+          stroke: colors.nodeBorderNormal,
           strokeWidth: "2px",
         };
         labelColor = "#333";
@@ -762,7 +762,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
         .attr("y", -d.height / 2)
         .attr("rx", 5)
         .attr("ry", 5)
-        .style("fill", nodeStyle.fill)
+        .style("fill", d.type === "group" ? d.groupColor : nodeStyle.fill)
         .style("stroke", nodeStyle.stroke)
         .style("stroke-width", nodeStyle.strokeWidth);
 
@@ -774,7 +774,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
         .style("font-weight", "bold")
         .style("font-family", "sans-serif")
         .style("fill", labelColor)
-        .text(d.name);
+        .text(d.type === "group" ? `${d.groupName}: ${d.name}` : d.name);
     });
 
     nodeGroups.append("title").text((d) => {
@@ -788,7 +788,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
       .on("mouseover", function (event, d) {
         d3.select(this)
           .select("rect")
-          .style("stroke", "#ff6f00")
+          .style("stroke", colors.nodeBorderSelected)
           .style("stroke-width", "4px");
       })
       .on("mouseout", function (event, d) {
@@ -806,7 +806,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           strokeColor = "#0D47A1";
           strokeWidth = "2px";
         } else {
-          strokeColor = "#1565C0";
+          strokeColor = colors.nodeBorderNormal;
           strokeWidth = "2px";
         }
 
@@ -820,7 +820,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
       .on("mouseover", function (event, d) {
         d3.select(this)
           .select("path")
-          .style("stroke", "#ff6f00")
+          .style("stroke", colors.nodeBorderSelected)
           .style("stroke-width", "3px");
 
         d3.select(this)
@@ -977,6 +977,15 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           onChange={(e) => setGroupName(e.target.value)}
           style={{ minWidth: "120px", maxWidth: "160px" }}
         />
+        <div
+          style={{ display: "flex", alignItems: "center", marginRight: "4px" }}
+        >
+          <ColorPicker
+            value={groupColor}
+            onChange={(color) => setGroupColor(color.toHexString())}
+            size="large"
+          />
+        </div>
         <Button
           className="btn"
           type="primary"
@@ -1041,7 +1050,10 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           className={"btn"}
           disabled={selectedNodeIds.length === 0}
           style={{
-            backgroundColor: selectedNodeIds.length > 0 ? "#ef4444" : "#9ca3af",
+            backgroundColor:
+              selectedNodeIds.length > 0
+                ? colors.nodeBorderSelected
+                : "#9ca3af",
             borderRadius: "0px",
             color: "white",
           }}
@@ -1053,8 +1065,9 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
-            background: "#dfdfdf",
+            background: "#fff",
             padding: "0px 10px",
+            height: "36px",
           }}
         >
           <Switch
