@@ -37,10 +37,6 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
   const currentZoomRef = useRef(d3.zoomIdentity);
 
   const colors = {
-    rootNodeBackground: "#8BAE66",
-    rootNodeBorder: "#628141",
-    level1NodeBackground: "#AAC4F5",
-    level1NodeBorder: "#8CA9FF",
     nodeBgNormal: "#e3f2fd",
     nodeBgSelected: "#edf2fb",
     nodeBorderNormal: "#1565C0",
@@ -177,6 +173,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
     );
 
     if (!groupNameIsUnique) {
+      
       alert("Group name already taken");
       return;
     }
@@ -425,136 +422,136 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
     }
   };
 
-  // const setupDrag = (inner, nodeLevels, rootNodes) => {
-  //   const drag = d3
-  //     .drag()
-  //     .on("start", function (event, d) {
-  //       isDraggingRef.current = true;
-  //       const nodeGroup = d3.select(this);
-  //       nodeGroup.raise();
+  const setupDrag = (inner, nodeLevels, rootNodes) => {
+    const drag = d3
+      .drag()
+      .on("start", function (event, d) {
+        isDraggingRef.current = true;
+        const nodeGroup = d3.select(this);
+        nodeGroup.raise();
 
-  //       const transform = nodeGroup.attr("transform");
-  //       if (transform) {
-  //         const match = transform.match(/translate\(([^,]+),([^)]+)\)/);
-  //         if (match) {
-  //           nodePositionsRef.current.set(d.id.toString(), {
-  //             x: parseFloat(match[1]),
-  //             y: parseFloat(match[2]),
-  //             width: d.width || getNodeWidth(d),
-  //             height: d.height || getNodeHeight(d),
-  //           });
-  //         }
-  //       }
-  //     })
-  //     .on("drag", function (event, d) {
-  //       if (!isDraggingRef.current) return;
+        const transform = nodeGroup.attr("transform");
+        if (transform) {
+          const match = transform.match(/translate\(([^,]+),([^)]+)\)/);
+          if (match) {
+            nodePositionsRef.current.set(d.id.toString(), {
+              x: parseFloat(match[1]),
+              y: parseFloat(match[2]),
+              width: d.width || getNodeWidth(d),
+              height: d.height || getNodeHeight(d),
+            });
+          }
+        }
+      })
+      .on("drag", function (event, d) {
+        if (!isDraggingRef.current) return;
 
-  //       const currentPos = nodePositionsRef.current.get(d.id.toString()) || {
-  //         x: 0,
-  //         y: 0,
-  //       };
-  //       const newX = currentPos.x + event.dx;
-  //       const newY = currentPos.y + event.dy;
+        const currentPos = nodePositionsRef.current.get(d.id.toString()) || {
+          x: 0,
+          y: 0,
+        };
+        const newX = currentPos.x + event.dx;
+        const newY = currentPos.y + event.dy;
 
-  //       nodePositionsRef.current.set(d.id.toString(), {
-  //         x: newX,
-  //         y: newY,
-  //         width: currentPos.width,
-  //         height: currentPos.height,
-  //       });
-  //       d3.select(this).attr("transform", `translate(${newX}, ${newY})`);
+        nodePositionsRef.current.set(d.id.toString(), {
+          x: newX,
+          y: newY,
+          width: currentPos.width,
+          height: currentPos.height,
+        });
+        d3.select(this).attr("transform", `translate(${newX}, ${newY})`);
 
-  //       const connectedLinks = links.filter(
-  //         (link) => link.source.id === d.id || link.target.id === d.id
-  //       );
+        const connectedLinks = links.filter(
+          (link) => link.source.id === d.id || link.target.id === d.id
+        );
 
-  //       connectedLinks.forEach((link) => {
-  //         const sourceId = link.source.id.toString();
-  //         const targetId = link.target.id.toString();
-  //         let sourcePos, targetPos;
-  //         let sourceDims, targetDims;
+        connectedLinks.forEach((link) => {
+          const sourceId = link.source.id.toString();
+          const targetId = link.target.id.toString();
+          let sourcePos, targetPos;
+          let sourceDims, targetDims;
 
-  //         if (sourceId === d.id.toString()) {
-  //           sourcePos = { x: newX, y: newY };
-  //           sourceDims = nodePositionsRef.current.get(sourceId);
-  //           targetPos =
-  //             nodePositionsRef.current.get(targetId) ||
-  //             getNodePositionFromDOM(targetId, inner);
-  //           targetDims = nodePositionsRef.current.get(targetId);
-  //         } else {
-  //           sourcePos =
-  //             nodePositionsRef.current.get(sourceId) ||
-  //             getNodePositionFromDOM(sourceId, inner);
-  //           sourceDims = nodePositionsRef.current.get(sourceId);
-  //           targetPos = { x: newX, y: newY };
-  //           targetDims = nodePositionsRef.current.get(targetId);
-  //         }
+          if (sourceId === d.id.toString()) {
+            sourcePos = { x: newX, y: newY };
+            sourceDims = nodePositionsRef.current.get(sourceId);
+            targetPos =
+              nodePositionsRef.current.get(targetId) ||
+              getNodePositionFromDOM(targetId, inner);
+            targetDims = nodePositionsRef.current.get(targetId);
+          } else {
+            sourcePos =
+              nodePositionsRef.current.get(sourceId) ||
+              getNodePositionFromDOM(sourceId, inner);
+            sourceDims = nodePositionsRef.current.get(sourceId);
+            targetPos = { x: newX, y: newY };
+            targetDims = nodePositionsRef.current.get(targetId);
+          }
 
-  //         if (sourcePos && targetPos && sourceDims && targetDims) {
-  //           updateEdgeDuringDrag(
-  //             sourceId,
-  //             targetId,
-  //             sourcePos.x,
-  //             sourcePos.y,
-  //             targetPos.x,
-  //             targetPos.y,
-  //             inner
-  //           );
-  //         }
-  //       });
-  //     })
-  //     .on("end", function (event, d) {
-  //       isDraggingRef.current = false;
+          if (sourcePos && targetPos && sourceDims && targetDims) {
+            updateEdgeDuringDrag(
+              sourceId,
+              targetId,
+              sourcePos.x,
+              sourcePos.y,
+              targetPos.x,
+              targetPos.y,
+              inner
+            );
+          }
+        });
+      })
+      .on("end", function (event, d) {
+        isDraggingRef.current = false;
 
-  //       const finalPos = nodePositionsRef.current.get(d.id.toString());
-  //       if (finalPos) {
-  //         setNodes((prev) =>
-  //           prev.map((node) =>
-  //             node.id === d.id
-  //               ? { ...node, x: finalPos.x, y: finalPos.y }
-  //               : node
-  //           )
-  //         );
-  //       }
+        const finalPos = nodePositionsRef.current.get(d.id.toString());
+        if (finalPos) {
+          setNodes((prev) =>
+            prev.map((node) =>
+              node.id === d.id
+                ? { ...node, x: finalPos.x, y: finalPos.y }
+                : node
+            )
+          );
+        }
 
-  //       const wasClick =
-  //         Math.abs(event.sourceEvent.movementX) < 2 &&
-  //         Math.abs(event.sourceEvent.movementY) < 2;
+        const wasClick =
+          Math.abs(event.sourceEvent.movementX) < 2 &&
+          Math.abs(event.sourceEvent.movementY) < 2;
 
-  //       if (wasClick) {
-  //         const clickedNodeId = d.id;
+        if (wasClick) {
+          const clickedNodeId = d.id;
 
-  //         if (event.sourceEvent.shiftKey) {
-  //           setSelectedNodeIds((prev) => {
-  //             if (selectedNodeIds.length > 0) {
-  //               const lastSelectedType = nodes.find(
-  //                 (n) => n.id === selectedNodeIds[selectedNodeIds.length - 1]
-  //               ).type;
-  //               const currentSelectedType = nodes.find(
-  //                 (n) => n.id === clickedNodeId
-  //               ).type;
-  //               if (
-  //                 lastSelectedType !== currentSelectedType ||
-  //                 lastSelectedType === "group"
-  //               ) {
-  //                 return [clickedNodeId];
-  //               }
-  //             }
+          if (event.sourceEvent.shiftKey) {
+            setSelectedNodeIds((prev) => {
+              if (selectedNodeIds.length > 0) {
+                const lastSelectedType = nodes.find(
+                  (n) => n.id === selectedNodeIds[selectedNodeIds.length - 1]
+                ).type;
+                const currentSelectedType = nodes.find(
+                  (n) => n.id === clickedNodeId
+                ).type;
+                if (
+                  lastSelectedType !== currentSelectedType ||
+                  lastSelectedType === "group"
+                ) {
+                  return [clickedNodeId];
+                }
+              }
 
-  //             if (prev.includes(clickedNodeId)) {
-  //               return prev.filter((id) => id !== clickedNodeId);
-  //             } else {
-  //               return [...prev, clickedNodeId];
-  //             }
-  //           });
-  //         } else {
-  //           setSelectedNodeIds([clickedNodeId]);
-  //         }
-  //       }
-  //     });
+              if (prev.includes(clickedNodeId)) {
+                return prev.filter((id) => id !== clickedNodeId);
+              } else {
+                return [...prev, clickedNodeId];
+              }
+            });
+          } else {
+            setSelectedNodeIds([clickedNodeId]);
+          }
+        }
+      });
 
-  //   inner.selectAll("g.node").call(drag);
-  // };
+    inner.selectAll("g.node").call(drag);
+  };
 
   const draw = () => {
     const childrenMap = {};
@@ -767,18 +764,18 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
         labelColor = colors.nodeTextColorSelected;
       } else if (isRoot) {
         nodeStyle = {
-          fill: colors.rootNodeBackground,
-          stroke: colors.rootNodeBorder,
+          fill: "#4CAF50",
+          stroke: "#2E7D32",
           strokeWidth: "3px",
         };
         labelColor = "#fff";
       } else if (level === 1) {
         nodeStyle = {
-          fill: colors.level1NodeBackground,
-          stroke: colors.level1NodeBorder,
+          fill: "#2196F3",
+          stroke: "#0D47A1",
           strokeWidth: "2px",
         };
-        labelColor = "#000";
+        labelColor = "#fff";
       } else {
         nodeStyle = {
           fill: colors.nodeBgNormal,
@@ -847,7 +844,6 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           .style("font-weight", "bold")
           .style("font-family", "sans-serif")
           .style("fill", "#fff")
-          .style("pointer-events", "none")
           .text(d.groupName);
 
         nodeGroup
@@ -858,7 +854,6 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           .style("font-size", "12px")
           .style("font-weight", "bold")
           .style("font-family", "sans-serif")
-          .style("pointer-events", "none")
           .style("fill", labelColor)
           .text(d.name);
       } else {
@@ -883,7 +878,6 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           .style("font-weight", "bold")
           .style("font-family", "sans-serif")
           .style("fill", labelColor)
-          .style("pointer-events", "none")
           .text(d.name);
       }
     });
@@ -893,39 +887,6 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
       const isRoot = rootNodes.some((root) => root.id === d.id);
       const nodeType = isRoot ? "Root/Parent" : `Child (Level ${level})`;
       return `${d?.asset_equipdesc || d.id}\nID: ${d.id}\nType: ${nodeType}`;
-    });
-
-    nodeGroups.on("click", function (event, d) {
-      event.stopPropagation(); // Prevent triggering the SVG click event
-
-      const clickedNodeId = d.id;
-
-      if (event.shiftKey) {
-        setSelectedNodeIds((prev) => {
-          if (selectedNodeIds.length > 0) {
-            const lastSelectedType = nodes.find(
-              (n) => n.id === selectedNodeIds[selectedNodeIds.length - 1]
-            ).type;
-            const currentSelectedType = nodes.find(
-              (n) => n.id === clickedNodeId
-            ).type;
-            if (
-              lastSelectedType !== currentSelectedType ||
-              lastSelectedType === "group"
-            ) {
-              return [clickedNodeId];
-            }
-          }
-
-          if (prev.includes(clickedNodeId)) {
-            return prev.filter((id) => id !== clickedNodeId);
-          } else {
-            return [...prev, clickedNodeId];
-          }
-        });
-      } else {
-        setSelectedNodeIds([clickedNodeId]);
-      }
     });
 
     nodeGroups
@@ -944,10 +905,10 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           strokeColor = colors.nodeBorderSelected;
           strokeWidth = "3px";
         } else if (isRoot) {
-          strokeColor = colors.rootNodeBorder;
+          strokeColor = "#2E7D32";
           strokeWidth = "3px";
         } else if (level === 1) {
-          strokeColor = colors.level1NodeBorder;
+          strokeColor = "#0D47A1";
           strokeWidth = "2px";
         } else {
           strokeColor = colors.nodeBorderNormal;
@@ -984,7 +945,7 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
           .style("stroke", "#000000");
       });
 
-    //setupDrag(inner, nodeLevels, rootNodes);
+    setupDrag(inner, nodeLevels, rootNodes);
 
     // ZOOM: Cache user zoom
     const zoom = d3
@@ -1051,8 +1012,8 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
               type: "node",
               x: parseFloat(item?.x || "0") || 0,
               y: parseFloat(item?.y || "0") || 0,
-              // name: " " + item.this_asset_id + " ",
-              name: item.this.asset_equipdesc,
+              name: " " + item.this_asset_id + " ",
+              asset_equipdesc: item.this.asset_equipdesc,
               criticality: item.criticality,
             },
           ])
