@@ -279,6 +279,8 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
 
   const handleDeleteNode = () => {
     if (selectedNodeIds.length > 0) {
+      setIsLayouting(true);
+
       setNodes((prev) =>
         prev.filter((node) => !selectedNodeIds.includes(node.id))
       );
@@ -291,7 +293,14 @@ function D3TopologyDiagram({ allAssets, backButtonHandler }) {
       );
       setSelectedNodeIds([]);
 
-      setTimeout(handleZoomToFit, 0);
+      // Use the exact same pattern as addBulkNodesHandler
+      setTimeout(() => {
+        handleZoomToFit(); // This only updates node positions, not zoom
+
+        setTimeout(() => {
+          setIsLayouting(false);
+        }, 100);
+      }, 50);
     }
   };
 
